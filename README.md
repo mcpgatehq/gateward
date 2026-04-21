@@ -1,6 +1,16 @@
 # MCPGate
 
-Transparent stdio proxy for Model Context Protocol (MCP) traffic that logs every JSON-RPC message to a local SQLite audit log and blocks three hard-coded attack patterns in real time.
+MCPGate blocks the prompt-injection attacks Anthropic decided not to fix at the MCP protocol level. Install in 60 seconds, defend against the Invariant Labs GitHub heist, the Supabase/Cursor SQL exfiltration, and destructive agent commands — with one line of config.
+
+## Why this exists
+
+Between May 2025 and April 2026, at least six public incidents demonstrated that MCP servers are an unguarded attack surface:
+
+- **Invariant Labs (May 2025):** A malicious public GitHub issue hijacked Claude via the official GitHub MCP server and exfiltrated private repository contents to public comments.
+- **Supabase/Cursor (July 2025):** Prompt injection through a support ticket caused an agent to run `service_role` SQL queries and leak a full customer table.
+- **Postmark MCP (August 2025):** A compromised community MCP server silently BCC'd every outgoing email to an attacker.
+
+Anthropic has stated these behaviors are "expected" and will not be patched at the protocol level. MCPGate is defense-in-depth that sits in front of any MCP server and blocks the three most-cited attack classes before they reach the model.
 
 ## Installation
 
@@ -11,7 +21,7 @@ pip install mcpgate
 The PyPI package has not yet been published. Until it is, clone this repo and install from source:
 
 ```
-git clone https://github.com/mcpgate/mcpgate
+git clone https://github.com/hishambjihad-ctrl/mcpgate.git
 cd mcpgate
 pip install -e .
 ```
