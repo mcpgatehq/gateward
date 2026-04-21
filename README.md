@@ -21,7 +21,7 @@ pip install mcpgate
 The PyPI package has not yet been published. Until it is, clone this repo and install from source:
 
 ```
-git clone https://github.com/hishambjihad-ctrl/mcpgate.git
+git clone https://github.com/mcpgatehq/mcpgate.git
 cd mcpgate
 pip install -e .
 ```
