@@ -3,25 +3,25 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcpgate"
+name = "gateward"
 version = "0.1.0"
-description = "Transparent stdio proxy for MCP traffic with audit logging and inline attack blocking."
+description = "Security gateway for Model Context Protocol (MCP) traffic. Blocks prompt injection, cross-repo exfiltration, and destructive commands."
 readme = "README.md"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
-authors = [{ name = "MCPGate authors" }]
-keywords = ["mcp", "proxy", "security", "audit"]
+authors = [{name = "Hisham Bjihad", email = "mcpgate@proton.me"}]
+keywords = ["mcp", "security", "proxy", "prompt-injection", "llm", "ai-agents", "model-context-protocol"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
-    "Operating System :: MacOS",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
+    "Topic :: System :: Networking :: Monitoring",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
 ]
 dependencies = [
     "click>=8.1",
@@ -29,11 +29,13 @@ dependencies = [
     "pydantic>=2.5",
 ]
 
+[project.urls]
+Homepage = "https://github.com/mcpgatehq/mcpgate"
+Repository = "https://github.com/mcpgatehq/mcpgate"
+Issues = "https://github.com/mcpgatehq/mcpgate/issues"
+
 [project.scripts]
 mcpgate = "mcpgate.cli:main"
-
-[project.urls]
-Homepage = "https://github.com/mcpgate/mcpgate"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcpgate"]
