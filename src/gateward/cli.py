@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import click
@@ -93,6 +94,63 @@ def drift(reset: bool, reset_server: str | None) -> None:
             console.print(text)
     finally:
         store.close()
+
+
+@main.command(
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
+)
+@click.argument("server_command", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.option("--json-output", "json_output", is_flag=True, help="Output results as JSON.")
+def scan(server_command: tuple[str, ...], json_output: bool) -> None:
+    """Scan an MCP server for security vulnerabilities.
+
+    Connects to the server, analyzes tool definitions, and produces a
+    security score report.
+
+    \b
+    Usage:
+      gateward scan -- npx @modelcontextprotocol/server-github
+      gateward scan -- python my_server.py
+    """
+    from gateward.scanner import MCPScanner, print_report
+
+    cmd = list(server_command)
+    if cmd and cmd[0] == "--":
+        cmd = cmd[1:]
+    if not cmd:
+        click.echo("Error: provide server command after --")
+        raise SystemExit(1)
+
+    if not json_output:
+        click.echo(f"Scanning: {' '.join(cmd)}")
+        click.echo("Connecting to MCP server...")
+        click.echo()
+
+    scanner = MCPScanner(cmd)
+    try:
+        score, findings, tools, server_info = asyncio.run(scanner.scan())
+    except FileNotFoundError as exc:
+        click.echo(f"Error: command not found: {exc.filename or cmd[0]}")
+        raise SystemExit(127)
+    except Exception as exc:
+        click.echo(f"Error: {exc}")
+        raise SystemExit(1)
+
+    if json_output:
+        click.echo(
+            json.dumps(
+                {
+                    "score": score,
+                    "server": server_info,
+                    "tools_count": len(tools),
+                    "findings": findings,
+                    "tools": [t.get("name") for t in tools],
+                },
+                indent=2,
+            )
+        )
+    else:
+        print_report(score, findings, tools, server_info, cmd)
 
 
 def _print_row(console: Console, row: dict) -> None:
