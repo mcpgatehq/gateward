@@ -206,6 +206,40 @@ _EXFIL_URL_SOURCES: list[str] = [
 
 EXFIL_URL_PATTERNS: list[re.Pattern[str]] = [re.compile(src) for src in _EXFIL_URL_SOURCES]
 
+_ARGUMENT_INJECTION_SOURCES: list[str] = [
+    # Subcommand execution via allowed interpreters
+    r"(?i)\b(npx|node)\s+-(c|e)\s+",
+    r"(?i)\b(python3?|ruby|perl|php)\s+-(c|e)\s+",
+    r"(?i)--eval[\s=]",
+    r"(?i)--exec[\s=]",
+    r"(?i)npm\s+exec\s+",
+    # Shell metacharacters — command substitution
+    r"\$\([^)]+\)",
+    r"`[^`]+`",
+    # Pipe to dangerous commands
+    r"\|\s*(bash|sh|zsh|dash|curl|wget|nc|netcat|ncat)\b",
+    # Command chaining to dangerous commands
+    r";\s*(curl|wget|bash|sh|rm|cat|nc|python|node|ruby)\b",
+    r"&&\s*(curl|wget|bash|sh|rm|cat|nc|python|node)\b",
+    # Git argument injection (CVE-2025-68144)
+    r"(?i)--config\s*=?\s*core\.(sshCommand|hooksPath|gitProxy)",
+    r"(?i)--upload-pack\s*=",
+    r"(?i)--receive-pack\s*=",
+    # Environment variable injection
+    r"(?i)\bLD_PRELOAD\s*=",
+    r"(?i)\bLD_LIBRARY_PATH\s*=",
+    r"(?i)\bPYTHONPATH\s*=.*\bpython",
+    r"(?i)\bNODE_OPTIONS\s*=",
+    r"(?i)\benv\s+\w+=\S+\s+(bash|sh|python|node|ruby|perl)\b",
+    # Process substitution
+    r"<\([^)]+\)",
+    r">\([^)]+\)",
+]
+
+ARGUMENT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(src) for src in _ARGUMENT_INJECTION_SOURCES
+]
+
 
 _B64_RE = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 _HEX_RE = re.compile(r"(?:0x)?([0-9a-fA-F]{40,})")

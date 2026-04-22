@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from gateward.patterns import (
+    ARGUMENT_INJECTION_PATTERNS,
     DESTRUCTIVE_SHELL_PATTERNS,
     EXFIL_URL_PATTERNS,
     INJECTION_PHRASES,
@@ -434,6 +435,43 @@ def check_exfil_url(message: dict, direction: str, session: Session) -> Decision
     return Decision(action="allow", rule="exfil_url_detection")
 
 
+def check_command_argument_injection(message: dict, direction: str, session: Session) -> Decision:
+    """Block tool calls whose arguments embed interpreter flags or shell
+    metacharacters that bypass command allowlists.
+
+    Covers the class of attacks behind CVE-2026-30615 (Windsurf zero-click
+    RCE) and CVE-2026-30625 (Upsonic allowlist bypass), where the tool
+    allowlist permitted commands like ``npx`` or ``python`` but a crafted
+    argument (``-c``, ``--eval``, ``$(…)``, ``; curl …``, ``LD_PRELOAD=…``,
+    ``<(…)``) turned the allowed binary into an arbitrary-code primitive.
+    Also catches CVE-2025-68144-style git argument injection
+    (``--config=core.sshCommand=…``, ``--upload-pack=…``).
+    """
+    if direction != "client_to_server":
+        return Decision(action="allow", rule="command_argument_injection")
+    if message.get("method") != "tools/call":
+        return Decision(action="allow", rule="command_argument_injection")
+
+    arguments = message.get("params", {}).get("arguments")
+    if arguments is None:
+        return Decision(action="allow", rule="command_argument_injection")
+
+    for value in _iter_string_values(arguments):
+        for pattern in ARGUMENT_INJECTION_PATTERNS:
+            match = pattern.search(value)
+            if match:
+                snippet = match.group(0).strip()[:60]
+                return Decision(
+                    action="block",
+                    reason=(
+                        f"command_argument_injection: '{snippet}' — possible "
+                        f"allowlist bypass (ref: CVE-2026-30615)"
+                    ),
+                    rule="command_argument_injection",
+                )
+    return Decision(action="allow", rule="command_argument_injection")
+
+
 # Order matters only for precedence of the reported rule name when multiple
 # rules would block the same message. The existing 5 are kept ahead of the
 # new 5 so their reasons remain stable. check_tool_schema_drift runs AFTER
@@ -450,6 +488,7 @@ _RULE_FUNCTIONS = (
     check_encoded_payload,
     check_ssrf_protection,
     check_exfil_url,
+    check_command_argument_injection,
 )
 
 
