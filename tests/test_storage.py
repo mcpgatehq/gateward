@@ -5,7 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from mcpgate.storage import MAX_LOGGED_BYTES, Storage
+from gateward.storage import MAX_LOGGED_BYTES, Storage
 
 
 def test_schema_created(tmp_path: Path) -> None:

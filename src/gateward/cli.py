@@ -1,4 +1,4 @@
-"""Click entry point for MCPGate."""
+"""Click entry point for Gateward."""
 from __future__ import annotations
 
 import asyncio
@@ -8,15 +8,15 @@ import click
 from rich.console import Console
 from rich.text import Text
 
-from mcpgate import __version__
-from mcpgate.proxy import run_proxy
-from mcpgate.storage import Storage, default_db_path
+from gateward import __version__
+from gateward.proxy import run_proxy
+from gateward.storage import Storage, default_db_path
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="mcpgate")
+@click.version_option(version=__version__, prog_name="gateward")
 def main() -> None:
-    """MCPGate — security gateway for MCP traffic."""
+    """Gateward — security gateway for MCP traffic."""
 
 
 @main.command(
@@ -24,7 +24,7 @@ def main() -> None:
 )
 @click.argument("server_command", nargs=-1, required=True, type=click.UNPROCESSED)
 def run(server_command: tuple[str, ...]) -> None:
-    """Run the proxy. Example: mcpgate run -- npx @modelcontextprotocol/server-github"""
+    """Run the proxy. Example: gateward run -- npx @modelcontextprotocol/server-github"""
     storage = Storage(default_db_path())
     try:
         exit_code = asyncio.run(run_proxy(list(server_command), storage))

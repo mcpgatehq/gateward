@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gateward"
-version = "0.1.0"
+version = "0.2.0"
 description = "Security gateway for Model Context Protocol (MCP) traffic. Blocks prompt injection, cross-repo exfiltration, and destructive commands."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -30,19 +30,19 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mcpgatehq/mcpgate"
-Repository = "https://github.com/mcpgatehq/mcpgate"
-Issues = "https://github.com/mcpgatehq/mcpgate/issues"
+Homepage = "https://github.com/mcpgatehq/gateward"
+Repository = "https://github.com/mcpgatehq/gateward"
+Issues = "https://github.com/mcpgatehq/gateward/issues"
 
 [project.scripts]
-mcpgate = "mcpgate.cli:main"
+gateward = "gateward.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mcpgate"]
+packages = ["src/gateward"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/mcpgate",
+    "src/gateward",
     "README.md",
     "LICENSE",
     "pyproject.toml",

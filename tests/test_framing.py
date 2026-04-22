@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mcpgate.framing import FramingError, read_message, write_message
+from gateward.framing import FramingError, read_message, write_message
 
 
 async def _pair_streams() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:

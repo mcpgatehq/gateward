@@ -13,7 +13,7 @@ venv/
 *.db
 *.db-wal
 *.db-shm
-.mcpgate/
+.gateward/
 .env
 .env.*
 .DS_Store

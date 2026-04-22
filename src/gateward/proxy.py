@@ -15,10 +15,10 @@ import sys
 import traceback
 from typing import Any
 
-from mcpgate.framing import FramingError, read_message, write_message
-from mcpgate.rules import Decision, evaluate
-from mcpgate.session import Session
-from mcpgate.storage import Storage
+from gateward.framing import FramingError, read_message, write_message
+from gateward.rules import Decision, evaluate
+from gateward.session import Session
+from gateward.storage import Storage
 
 _MAX_STREAM_BYTES = 10 * 1024 * 1024
 _TERMINATE_GRACE_SECONDS = 2.0
@@ -51,7 +51,7 @@ def _synthesize_block_error(message_id: Any, rule: str) -> dict[str, Any]:
         "id": message_id,
         "error": {
             "code": -32000,
-            "message": f"MCPGate blocked: {rule}",
+            "message": f"Gateward blocked: {rule}",
         },
     }
 
@@ -81,7 +81,7 @@ def _log(
             session.server_name,
         )
     except Exception as exc:  # SQLite failure must not kill the proxy.
-        print(f"mcpgate: storage failure: {exc}", file=sys.stderr)
+        print(f"gateward: storage failure: {exc}", file=sys.stderr)
 
 
 def _safe_evaluate(message: dict, direction: str, session: Session) -> Decision:
@@ -125,7 +125,7 @@ async def _forward(
         except (asyncio.CancelledError, GeneratorExit):
             raise
         except Exception as exc:
-            print(f"mcpgate: read error ({direction}): {exc}", file=sys.stderr)
+            print(f"gateward: read error ({direction}): {exc}", file=sys.stderr)
             break
 
         if message is None:
@@ -153,7 +153,7 @@ async def _forward(
 
 async def run_proxy(server_command: list[str], storage: Storage) -> int:
     if not server_command:
-        print("mcpgate: no server command provided", file=sys.stderr)
+        print("gateward: no server command provided", file=sys.stderr)
         return 2
 
     server_name = _derive_server_name(server_command)
@@ -188,13 +188,13 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
         )
     except FileNotFoundError:
         print(
-            f"mcpgate: command not found: {server_command[0]}",
+            f"gateward: command not found: {server_command[0]}",
             file=sys.stderr,
         )
         storage.end_session(session.session_id)
         return 127
     except OSError as exc:
-        print(f"mcpgate: failed to spawn server: {exc}", file=sys.stderr)
+        print(f"gateward: failed to spawn server: {exc}", file=sys.stderr)
         storage.end_session(session.session_id)
         return 1
 
@@ -222,7 +222,7 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
             session=session,
             storage=storage,
         ),
-        name="mcpgate-c2s",
+        name="gateward-c2s",
     )
     server_to_client = asyncio.create_task(
         _forward(
@@ -233,10 +233,10 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
             session=session,
             storage=storage,
         ),
-        name="mcpgate-s2c",
+        name="gateward-s2c",
     )
-    subprocess_wait = asyncio.create_task(subprocess.wait(), name="mcpgate-wait")
-    shutdown_wait = asyncio.create_task(shutdown_event.wait(), name="mcpgate-shutdown")
+    subprocess_wait = asyncio.create_task(subprocess.wait(), name="gateward-wait")
+    shutdown_wait = asyncio.create_task(shutdown_event.wait(), name="gateward-shutdown")
 
     done, pending = await asyncio.wait(
         {client_to_server, server_to_client, subprocess_wait, shutdown_wait},

@@ -1,6 +1,6 @@
-"""Hard-coded blocking rules for MCPGate v0.1.
+"""Hard-coded blocking rules for Gateward.
 
-Three rules, evaluated in order on each message. First block wins. Non
+Rules are evaluated in order on each message. First block wins. Non
 tool-call / non-result messages (``initialize``, ``ping``, notifications,
 etc.) short-circuit to ``allow`` so protocol handshake and lifecycle
 traffic is never interfered with.
@@ -11,8 +11,13 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from mcpgate.patterns import DESTRUCTIVE_SHELL_PATTERNS, INJECTION_PHRASES
-from mcpgate.session import Session
+from gateward.patterns import (
+    DESTRUCTIVE_SHELL_PATTERNS,
+    INJECTION_PHRASES,
+    PATH_TRAVERSAL_PATTERNS,
+    SECRETS_PATTERNS,
+)
+from gateward.session import Session
 
 Action = Literal["allow", "block", "warn"]
 
@@ -183,7 +188,59 @@ def check_destructive_shell(message: dict, direction: str, session: Session) -> 
     return Decision(action="allow", rule="destructive_shell")
 
 
-_RULE_FUNCTIONS = (check_cross_repo, check_injection_phrases, check_destructive_shell)
+def check_secrets_in_response(message: dict, direction: str, session: Session) -> Decision:
+    """Block tool responses whose text contains a credential-shaped pattern."""
+    if direction != "server_to_client":
+        return Decision(action="allow", rule="secrets_in_response")
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return Decision(action="allow", rule="secrets_in_response")
+    if "content" not in result:
+        return Decision(action="allow", rule="secrets_in_response")
+
+    haystack = " ".join(_iter_result_text(result))
+    if not haystack:
+        return Decision(action="allow", rule="secrets_in_response")
+
+    for pattern in SECRETS_PATTERNS:
+        if pattern.search(haystack):
+            return Decision(
+                action="block",
+                reason=f"secrets_in_response: matched '{pattern.pattern}' pattern",
+                rule="secrets_in_response",
+            )
+    return Decision(action="allow", rule="secrets_in_response")
+
+
+def check_path_traversal(message: dict, direction: str, session: Session) -> Decision:
+    """Block tool calls whose arguments reference sensitive paths or traversal sequences."""
+    if direction != "client_to_server":
+        return Decision(action="allow", rule="path_traversal")
+    if message.get("method") != "tools/call":
+        return Decision(action="allow", rule="path_traversal")
+
+    arguments = message.get("params", {}).get("arguments")
+    if arguments is None:
+        return Decision(action="allow", rule="path_traversal")
+
+    for value in _iter_string_values(arguments):
+        for pattern in PATH_TRAVERSAL_PATTERNS:
+            if pattern.search(value):
+                return Decision(
+                    action="block",
+                    reason=f"path_traversal: matched '{pattern.pattern}' in argument",
+                    rule="path_traversal",
+                )
+    return Decision(action="allow", rule="path_traversal")
+
+
+_RULE_FUNCTIONS = (
+    check_cross_repo,
+    check_injection_phrases,
+    check_destructive_shell,
+    check_secrets_in_response,
+    check_path_traversal,
+)
 
 
 def evaluate(message: dict, direction: str, session: Session) -> Decision:

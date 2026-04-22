@@ -2,7 +2,7 @@
 
 MCP over stdio is line-delimited: one complete JSON object per line, each
 terminated by a single ``\\n``. There is no Content-Length header — that is
-the HTTP/LSP transport, which MCPGate does not implement in v0.1.
+the HTTP/LSP transport, which Gateward does not implement in v0.1.
 """
 from __future__ import annotations
 

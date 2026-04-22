@@ -1,13 +1,13 @@
 """Per-rule and orchestrator tests. No network, no subprocess."""
 from __future__ import annotations
 
-from mcpgate.rules import (
+from gateward.rules import (
     check_cross_repo,
     check_destructive_shell,
     check_injection_phrases,
     evaluate,
 )
-from mcpgate.session import Session
+from gateward.session import Session
 
 
 def _github_session() -> Session:

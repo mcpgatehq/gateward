@@ -1,4 +1,4 @@
-"""End-to-end proxy tests: spawn mcpgate as a subprocess around a fake MCP server.
+"""End-to-end proxy tests: spawn gateward as a subprocess around a fake MCP server.
 
 These tests exercise the full stdio transport path — parent stdin/stdout
 wrapping, subprocess spawn, bidirectional forwarding, rule evaluation,
@@ -19,11 +19,11 @@ FAKE_SERVER = Path(__file__).parent / "fake_mcp_server.py"
 
 
 async def _spawn_proxy(db_path: Path) -> asyncio.subprocess.Process:
-    env = {**os.environ, "MCPGATE_DB_PATH": str(db_path)}
+    env = {**os.environ, "GATEWARD_DB_PATH": str(db_path)}
     return await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "mcpgate",
+        "gateward",
         "run",
         "--",
         sys.executable,
@@ -165,11 +165,11 @@ def test_cross_repo_block_on_second_call(tmp_path: Path) -> None:
         server_copy = target_dir / "server-github.py"
         server_copy.write_text(FAKE_SERVER.read_text())
 
-        env = {**os.environ, "MCPGATE_DB_PATH": str(db)}
+        env = {**os.environ, "GATEWARD_DB_PATH": str(db)}
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "mcpgate",
+            "gateward",
             "run",
             "--",
             sys.executable,
@@ -271,11 +271,11 @@ def test_subprocess_crash_exits_cleanly(tmp_path: Path) -> None:
             "sys.stdin.readline()\n"
             "sys.exit(17)\n"
         )
-        env = {**os.environ, "MCPGATE_DB_PATH": str(db)}
+        env = {**os.environ, "GATEWARD_DB_PATH": str(db)}
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "mcpgate",
+            "gateward",
             "run",
             "--",
             sys.executable,

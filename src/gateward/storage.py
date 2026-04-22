@@ -1,7 +1,7 @@
-"""SQLite audit log for MCPGate.
+"""SQLite audit log for Gateward.
 
 One row per intercepted JSON-RPC message, plus a session row per run. WAL mode
-is enabled so readers (``mcpgate tail --follow``) never block writers.
+is enabled so readers (``gateward tail --follow``) never block writers.
 """
 from __future__ import annotations
 
@@ -46,10 +46,10 @@ MAX_LOGGED_BYTES = 1024 * 1024
 
 
 def default_db_path() -> Path:
-    override = os.environ.get("MCPGATE_DB_PATH")
+    override = os.environ.get("GATEWARD_DB_PATH")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".mcpgate" / "audit.db"
+    return Path.home() / ".gateward" / "audit.db"
 
 
 class Storage:
