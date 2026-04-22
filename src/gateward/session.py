@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
+    from gateward.canary import CanaryTripwire
     from gateward.schema_store import SchemaStore
 
 
@@ -18,3 +19,4 @@ class Session:
     tool_call_count: int = 0
     blocked_count: int = 0
     schema_store: Optional["SchemaStore"] = None
+    canary_store: Optional["CanaryTripwire"] = None

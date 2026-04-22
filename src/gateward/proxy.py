@@ -15,6 +15,7 @@ import sys
 import traceback
 from typing import Any
 
+from gateward.canary import CanaryTripwire
 from gateward.framing import FramingError, read_message, write_message
 from gateward.rules import Decision, evaluate
 from gateward.schema_store import SchemaStore
@@ -146,8 +147,22 @@ async def _forward(
                 return
             continue
 
+        outbound_message = message
+        if direction == "server_to_client" and session.canary_store is not None:
+            # Rule 12 (inject side): stamp an invisible marker on every tool
+            # response so the outbound checker can later catch the agent
+            # copying response data into a new request. Failure is
+            # non-fatal — if injection raises we still forward the original.
+            try:
+                outbound_message = session.canary_store.inject_into_response(
+                    session.session_id, message
+                )
+            except Exception as exc:
+                print(f"gateward: canary inject failed: {exc}", file=sys.stderr)
+                outbound_message = message
+
         try:
-            await write_message(forward_writer, message)
+            await write_message(forward_writer, outbound_message)
         except (ConnectionError, BrokenPipeError, OSError):
             return
 
@@ -164,6 +179,7 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
     except Exception as exc:
         print(f"gateward: schema store init failed: {exc}", file=sys.stderr)
         session.schema_store = None
+    session.canary_store = CanaryTripwire()
     storage.start_session(session.session_id, server_name, session.server_command)
 
     loop = asyncio.get_running_loop()
@@ -339,4 +355,6 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
     storage.end_session(session.session_id)
     if session.schema_store is not None:
         session.schema_store.close()
+    if session.canary_store is not None:
+        session.canary_store.clear_session(session.session_id)
     return exit_code

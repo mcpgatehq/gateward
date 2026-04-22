@@ -106,7 +106,10 @@ def test_happy_path_initialize_and_tool_call(tmp_path: Path) -> None:
             )
             echo_resp = await _recv(proc)
             assert echo_resp["id"] == 2
-            assert echo_resp["result"]["content"][0]["text"] == "hello"
+            # Rule 12 appends a canary marker to every forwarded response;
+            # assert the user-visible prefix is intact, not exact equality.
+            assert echo_resp["result"]["content"][0]["text"].startswith("hello")
+            assert "<!-- gw:" in echo_resp["result"]["content"][0]["text"]
         finally:
             await _shutdown(proc)
 

@@ -435,6 +435,28 @@ def check_exfil_url(message: dict, direction: str, session: Session) -> Decision
     return Decision(action="allow", rule="exfil_url_detection")
 
 
+def check_canary_tripwire(message: dict, direction: str, session: Session) -> Decision:
+    """Detect data exfiltration via session-scoped canary tokens (Rule 12).
+
+    Every tool response that Gateward forwards to the client gets an
+    invisible marker appended. If a later outbound ``tools/call`` from the
+    same session contains one of those markers, the agent is copying raw
+    response data into a request — which is what exfiltration looks like
+    regardless of whether it came from injection, SSRF, a poisoned tool
+    description, or something entirely novel. Fails open if the session
+    has no canary store attached (e.g. unit tests of other rules).
+    """
+    if direction != "client_to_server":
+        return Decision(action="allow", rule="canary_tripwire")
+    if session.canary_store is None:
+        return Decision(action="allow", rule="canary_tripwire")
+
+    reason = session.canary_store.check_outbound(session.session_id, message)
+    if reason:
+        return Decision(action="block", reason=reason, rule="canary_tripwire")
+    return Decision(action="allow", rule="canary_tripwire")
+
+
 def check_command_argument_injection(message: dict, direction: str, session: Session) -> Decision:
     """Block tool calls whose arguments embed interpreter flags or shell
     metacharacters that bypass command allowlists.
@@ -477,7 +499,12 @@ def check_command_argument_injection(message: dict, direction: str, session: Ses
 # new 5 so their reasons remain stable. check_tool_schema_drift runs AFTER
 # check_tool_description_scan so a poisoned tools/list is blocked without
 # being recorded as a "known good" baseline fingerprint.
+# check_canary_tripwire runs first on outbound: it is the cheapest definitive
+# signal (single substring search vs. regex batteries) and catches any
+# exfiltration attempt regardless of vector, so when it fires it deserves to
+# be the reported rule.
 _RULE_FUNCTIONS = (
+    check_canary_tripwire,
     check_cross_repo,
     check_injection_phrases,
     check_destructive_shell,
