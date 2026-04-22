@@ -328,91 +328,342 @@ _ALL_RULE_NAMES = {
 }
 
 
+# Human-readable labels shown in the report header for each rule name.
+_RULE_TITLES: dict[str, str] = {
+    "tool_poisoning": "Tool Description Poisoning",
+    "injection_in_description": "Injection Phrase in Description",
+    "unicode_hiding": "Invisible Unicode in Description",
+    "shell_execution": "Shell Command Execution",
+    "file_access": "File Path Access",
+    "network_access": "Network / URL Access",
+    "sql_execution": "SQL Query Execution",
+    "dangerous_capability": "Dangerous Capability",
+    "large_attack_surface": "Large Attack Surface",
+    "connection": "Connection",
+}
+
+
+# Per-rule impact narrative and authoritative reference, used by the report
+# renderer. Keep these short (one line each) — the renderer already shows
+# the scanner's finding detail above them.
+FINDING_DETAILS: dict[str, dict[str, str | None]] = {
+    "tool_poisoning": {
+        "impact": "Tool descriptions are injected into AI context. An attacker can hide instructions that hijack the agent.",
+        "ref": "MCPTox benchmark — 84.2% attack success rate",
+    },
+    "injection_in_description": {
+        "impact": "Tool descriptions contain phrases designed to override agent behavior.",
+        "ref": "Invariant Labs tool poisoning (April 2025)",
+    },
+    "unicode_hiding": {
+        "impact": "Invisible characters can hide malicious instructions from human review while remaining visible to AI.",
+        "ref": "CVE-2021-42574 (Trojan Source)",
+    },
+    "shell_execution": {
+        "impact": "Attacker can execute arbitrary code on your system.",
+        "ref": "CVE-2026-30615 (Windsurf), CVE-2026-30625 (Upsonic)",
+    },
+    "file_access": {
+        "impact": "Attacker can read files outside the intended directory.",
+        "ref": "CVE-2025-68143, CVE-2025-68145 (Git MCP)",
+    },
+    "network_access": {
+        "impact": "Attacker can access internal networks and cloud metadata.",
+        "ref": "AWS metadata theft (169.254.169.254)",
+    },
+    "sql_execution": {
+        "impact": "Attacker can read, modify, or delete database contents.",
+        "ref": "Supabase/Cursor incident (July 2025)",
+    },
+    "dangerous_capability": {
+        "impact": "Tool has inherently risky capabilities. Ensure proper access controls.",
+        "ref": None,
+    },
+    "large_attack_surface": {
+        "impact": "More tools means more potential attack vectors. Apply least-privilege.",
+        "ref": None,
+    },
+    "connection": {
+        "impact": "Could not connect to the MCP server. Check the server command.",
+        "ref": None,
+    },
+}
+
+
+def _pretty_rule(rule: str) -> str:
+    return _RULE_TITLES.get(rule, rule.replace("_", " ").title())
+
+
 def print_report(
     score: float,
     findings: list[dict],
     tools: list[dict],
     server_info: dict,
     server_command: list[str],
+    duration_seconds: float,
 ) -> None:
-    """Render a colorful terminal report."""
+    """Render the enterprise-grade terminal report."""
+    from datetime import datetime, timezone
+
     from rich.console import Console
     from rich.panel import Panel
+    from rich.rule import Rule
+    from rich.table import Table
+    from rich.text import Text
 
     console = Console()
 
-    if score >= 8:
-        score_color, score_label = "green", "GOOD"
-    elif score >= 5:
-        score_color, score_label = "yellow", "MODERATE"
-    elif score >= 3:
-        score_color, score_label = "red", "POOR"
-    else:
-        score_color, score_label = "red bold", "CRITICAL"
-
-    filled = int(score)
-    empty = 10 - filled
-    score_bar = "█" * filled + "░" * empty
-
+    # -------- Header --------
     server_name = server_info.get("name", "unknown")
     server_version = server_info.get("version", "?")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    target = " ".join(server_command)
+
+    header_body = Text()
+    header_body.append("GATEWARD", style="bold cyan")
+    header_body.append("   ", style="")
+    header_body.append("Security Scanner v0.3.0", style="dim")
 
     console.print()
-    console.print(
-        Panel.fit(
-            f"[bold]GATEWARD SECURITY SCAN REPORT[/bold]\n"
-            f"[dim]{server_name} v{server_version}[/dim]",
-            border_style="blue",
+    console.print(Panel(header_body, border_style="cyan", padding=(0, 2), expand=False))
+    console.print()
+
+    info = Table.grid(padding=(0, 2))
+    info.add_column(style="dim", no_wrap=True)
+    info.add_column(overflow="fold")
+    info.add_row("Target", Text(target, style="bold"))
+    info.add_row("Server", f"{server_name} v{server_version}")
+    info.add_row("Tools", str(len(tools)))
+    info.add_row("Duration", f"{duration_seconds:.2f}s")
+    info.add_row("Scanned", timestamp)
+    console.print(info)
+    console.print()
+    console.print(Rule(characters="━", style="dim"))
+    console.print()
+
+    # -------- Score --------
+    score_int = int(round(score))
+    if score_int >= 8:
+        score_color, score_label = "green", "SECURE"
+    elif score_int >= 4:
+        score_color, score_label = "yellow", "AT RISK"
+    else:
+        score_color, score_label = "red", "HIGH RISK"
+
+    critical_count = sum(1 for f in findings if f.get("severity") == "CRITICAL")
+    high_count = sum(1 for f in findings if f.get("severity") == "HIGH")
+    warning_count = sum(1 for f in findings if f.get("severity") == "WARNING")
+
+    filled = max(0, min(10, score_int))
+    empty = 10 - filled
+    bar = Text()
+    bar.append("█" * filled, style=score_color)
+    bar.append("░" * empty, style="dim")
+
+    score_line = Text()
+    score_line.append("Security Score   ", style="bold")
+    score_line.append(f"{score_int}/10", style=f"bold {score_color}")
+    score_line.append("   ")
+    score_line.append_text(bar)
+    score_line.append(f"   {score_label}", style=f"bold {score_color}")
+    console.print(score_line)
+
+    summary = Text()
+    summary.append(
+        f"{critical_count} CRITICAL", style="red bold" if critical_count else "dim"
+    )
+    summary.append("   ·   ", style="dim")
+    summary.append(f"{high_count} HIGH", style="yellow bold" if high_count else "dim")
+    summary.append("   ·   ", style="dim")
+    summary.append(f"{warning_count} WARNING", style="yellow" if warning_count else "dim")
+    console.print(summary)
+    console.print()
+
+    if score_int == 10 and not findings:
+        console.print(
+            Panel(
+                Text.from_markup(
+                    "[green bold]No security issues detected.[/green bold]\n"
+                    "[dim]This MCP server passed all Gateward checks.[/dim]"
+                ),
+                border_style="green",
+                padding=(0, 2),
+                expand=False,
+            )
         )
-    )
-    console.print()
-    console.print(
-        f"  Security Score:  [{score_color}]{score}/10  {score_bar} {score_label}[/{score_color}]"
-    )
-    console.print(f"  Tools found:     {len(tools)}")
-    console.print(f"  Issues found:    {len(findings)}")
-    console.print()
+        console.print()
 
-    if findings:
-        for severity in ("CRITICAL", "HIGH", "WARNING"):
-            subset = [f for f in findings if f.get("severity") == severity]
+    # -------- Findings (deduplicated) --------
+    seen: set[tuple] = set()
+    deduped: list[dict] = []
+    for finding in findings:
+        key = (finding.get("severity"), finding.get("rule"), finding.get("tool"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(finding)
+
+    if deduped:
+        for severity, icon, color in (
+            ("CRITICAL", "✗", "red"),
+            ("HIGH", "✗", "yellow"),
+            ("WARNING", "⚠", "yellow"),
+        ):
+            subset = [f for f in deduped if f.get("severity") == severity]
             if not subset:
                 continue
-            if severity == "CRITICAL":
-                icon, color = "[!!]", "red bold"
-            elif severity == "HIGH":
-                icon, color = "[!]", "red"
-            else:
-                icon, color = "[*]", "yellow"
+
+            header = Text()
+            header.append(f"{severity} FINDINGS", style=f"bold {color}")
+            header.append(f"   ({len(subset)})", style="dim")
+            console.print(header)
+            console.print()
+
             for finding in subset:
-                tool_name = finding.get("tool", "")
-                tool_str = f" [{tool_name}]" if tool_name else ""
-                console.print(
-                    f"  {icon} [{color}]{severity}[/{color}]{tool_str} — {finding.get('detail', '')}"
-                )
-        console.print()
+                rule = finding.get("rule", "") or ""
+                tool = finding.get("tool", "") or ""
+                detail = finding.get("detail", "") or ""
+                info_entry = FINDING_DETAILS.get(rule, {})
 
-    failed = {f.get("rule") for f in findings}
-    passed = _ALL_RULE_NAMES - failed
+                title = Text()
+                title.append(f"  {icon}  ", style=color)
+                title.append(_pretty_rule(rule), style=f"bold {color}")
+                if tool:
+                    title.append("   ", style="")
+                    title.append(tool, style="dim")
+                console.print(title)
+
+                console.print(Text(f"     {detail}"))
+                impact = info_entry.get("impact") if info_entry else None
+                if impact:
+                    imp = Text()
+                    imp.append("     Impact  ", style="dim")
+                    imp.append(impact, style="italic")
+                    console.print(imp)
+                ref = info_entry.get("ref") if info_entry else None
+                if ref:
+                    rline = Text()
+                    rline.append("     Ref     ", style="dim")
+                    rline.append(ref, style="dim")
+                    console.print(rline)
+                console.print()
+
+    # -------- Passed checks (compact) --------
+    failed_rules = {f.get("rule") for f in findings}
+    passed = sorted(_ALL_RULE_NAMES - failed_rules)
     if passed:
-        for rule in sorted(passed):
-            console.print(f"  [OK] PASS — {rule.replace('_', ' ').title()}")
+        console.print(Rule(characters="━", style="dim"))
+        console.print()
+        console.print(Text(f"PASSED CHECKS   ({len(passed)})", style="bold green"))
+        console.print()
+        for rule in passed:
+            line = Text()
+            line.append("  ✓  ", style="green")
+            line.append(_pretty_rule(rule), style="dim")
+            console.print(line)
         console.print()
 
-    before_cmd = server_command[0]
-    before_args = json.dumps(server_command[1:])
-    after_args_list = ", ".join(json.dumps(a) for a in server_command[1:])
-    console.print(
-        Panel.fit(
-            f"[bold]FIX: Add Gateward as proxy[/bold]\n\n"
-            f"[red]Before (vulnerable):[/red]\n"
-            f'  "command": "{before_cmd}",\n'
-            f'  "args": {before_args}\n\n'
-            f"[green]After (protected by 12 rules):[/green]\n"
-            f'  "command": "gateward",\n'
-            f'  "args": ["run", "--", "{before_cmd}", {after_args_list}]\n\n'
-            f"[dim]Score: {score}/10 → Protected by 12 security rules[/dim]",
-            border_style="green",
+    # -------- Tools table --------
+    if tools:
+        console.print(Rule(characters="━", style="dim"))
+        console.print()
+        console.print(Text("TOOLS ANALYZED", style="bold"))
+        console.print()
+
+        severity_rank = {"CRITICAL": 3, "HIGH": 2, "WARNING": 1}
+        tool_risk: dict[str, str] = {}
+        for finding in findings:
+            tool_name = finding.get("tool")
+            if not tool_name:
+                continue
+            sev = finding.get("severity")
+            if sev not in severity_rank:
+                continue
+            current = tool_risk.get(tool_name)
+            if current is None or severity_rank[sev] > severity_rank[current]:
+                tool_risk[tool_name] = sev
+
+        table = Table(
+            show_edge=False,
+            show_lines=False,
+            pad_edge=False,
+            box=None,
+            padding=(0, 2),
         )
-    )
+        table.add_column("#", justify="right", style="dim", width=3)
+        table.add_column("Name", style="bold", no_wrap=True)
+        table.add_column("Parameters", style="dim")
+        table.add_column("Risk", width=10)
+
+        for idx, tool in enumerate(tools, 1):
+            name = tool.get("name", "?")
+            schema = tool.get("inputSchema", {}) or {}
+            props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+            if isinstance(props, dict) and props:
+                keys = list(props.keys())
+                params_str = ", ".join(keys[:5])
+                if len(keys) > 5:
+                    params_str += f", +{len(keys) - 5}"
+            else:
+                params_str = "—"
+
+            risk = tool_risk.get(name, "NONE")
+            if risk == "CRITICAL":
+                risk_cell: Text = Text("CRITICAL", style="red bold")
+            elif risk == "HIGH":
+                risk_cell = Text("HIGH", style="yellow bold")
+            elif risk == "WARNING":
+                risk_cell = Text("WARNING", style="yellow")
+            else:
+                risk_cell = Text("NONE", style="green dim")
+            table.add_row(str(idx), name, params_str, risk_cell)
+
+        console.print(table)
+        console.print()
+
+    # -------- Remediation --------
+    if score_int < 10:
+        console.print(Rule(characters="━", style="dim"))
+        console.print()
+        before_cmd = server_command[0]
+        before_args = json.dumps(server_command[1:])
+        after_args = ", ".join(json.dumps(a) for a in server_command[1:])
+
+        body = Text()
+        body.append("Recommended fix\n\n", style="bold")
+        body.append("Wrap the MCP server with ", style="")
+        body.append("gateward run", style="bold cyan")
+        body.append(":\n\n", style="")
+        body.append("  pip install gateward\n\n", style="green")
+        body.append("Client config — before:\n", style="dim")
+        body.append(f'  "command": "{before_cmd}",\n', style="red")
+        body.append(f'  "args": {before_args}\n\n', style="red")
+        body.append("Client config — after:\n", style="dim")
+        body.append('  "command": "gateward",\n', style="green")
+        body.append(
+            f'  "args": ["run", "--", "{before_cmd}", {after_args}]\n\n',
+            style="green",
+        )
+        body.append("All 12 security rules enforced at runtime.\n", style="dim")
+        body.append("https://github.com/mcpgatehq/gateward", style="cyan")
+
+        console.print(
+            Panel(
+                body,
+                border_style="green",
+                title="[bold green]REMEDIATION[/bold green]",
+                title_align="left",
+                padding=(1, 2),
+            )
+        )
+        console.print()
+
+    # -------- Footer --------
+    console.print(Rule(characters="━", style="dim"))
+    console.print()
+    footer = Text()
+    footer.append("Scan complete. ", style="dim")
+    footer.append("Report generated by ", style="dim")
+    footer.append("Gateward v0.3.0", style="dim cyan")
+    console.print(footer)
     console.print()

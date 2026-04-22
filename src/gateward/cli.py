@@ -127,6 +127,7 @@ def scan(server_command: tuple[str, ...], json_output: bool) -> None:
         click.echo()
 
     scanner = MCPScanner(cmd)
+    start = time.perf_counter()
     try:
         score, findings, tools, server_info = asyncio.run(scanner.scan())
     except FileNotFoundError as exc:
@@ -135,6 +136,7 @@ def scan(server_command: tuple[str, ...], json_output: bool) -> None:
     except Exception as exc:
         click.echo(f"Error: {exc}")
         raise SystemExit(1)
+    duration = time.perf_counter() - start
 
     if json_output:
         click.echo(
@@ -150,7 +152,7 @@ def scan(server_command: tuple[str, ...], json_output: bool) -> None:
             )
         )
     else:
-        print_report(score, findings, tools, server_info, cmd)
+        print_report(score, findings, tools, server_info, cmd, duration)
 
 
 def _print_row(console: Console, row: dict) -> None:
