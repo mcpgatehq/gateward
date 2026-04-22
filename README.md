@@ -1,43 +1,20 @@
 # Gateward
 
-Gateward blocks the prompt-injection attacks Anthropic decided not to fix at the MCP protocol level. Install in 60 seconds, defend against the Invariant Labs GitHub heist, the Supabase/Cursor SQL exfiltration, and destructive agent commands — with one line of config.
+**Security gateway for MCP traffic. 12 rules. 172 tests. One pip install.**
 
-## Why this exists
+Gateward sits between your AI agent and any MCP server, inspecting every JSON-RPC message in both directions. It blocks prompt injection, credential leakage, command injection, data exfiltration, and supply chain poisoning — before threats reach your model or your infrastructure.
 
-Between May 2025 and April 2026, at least six public incidents demonstrated that MCP servers are an unguarded attack surface:
+## Why
 
-- **Invariant Labs (May 2025):** A malicious public GitHub issue hijacked Claude via the official GitHub MCP server and exfiltrated private repository contents to public comments.
-- **Supabase/Cursor (July 2025):** Prompt injection through a support ticket caused an agent to run `service_role` SQL queries and leak a full customer table.
-- **Postmark MCP (August 2025):** A compromised community MCP server silently BCC'd every outgoing email to an attacker.
+Between January and April 2026, researchers filed [14 CVEs](https://github.com/mcpgatehq/gateward) targeting MCP servers. AWS, Atlassian, VS Code, Windsurf, Claude Code — all compromised through the same protocol. Anthropic has stated these behaviors are "expected" and will not be patched. Gateward is the defense-in-depth layer the ecosystem needs.
 
-Anthropic has stated these behaviors are "expected" and will not be patched at the protocol level. Gateward is defense-in-depth that sits in front of any MCP server and blocks the most-cited attack classes before they reach the model.
+## Quick Start
 
-## Installation
-
-```
+```bash
 pip install gateward
 ```
 
-Python 3.11+ on Linux or macOS. Windows is not supported in v0.2.
-
-## Quick start
-
-Gateward wraps an existing MCP server command. Wherever your MCP client config invokes the server directly, change it to route through `gateward run --`.
-
-For example, the stock Claude Code config for the official GitHub MCP server:
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["@modelcontextprotocol/server-github"]
-    }
-  }
-}
-```
-
-becomes:
+Change one line in your MCP client config:
 
 ```json
 {
@@ -50,65 +27,147 @@ becomes:
 }
 ```
 
-That is the only change required. Gateward spawns the server as a subprocess, forwards MCP traffic byte-for-byte in both directions, and records every message to `~/.gateward/audit.db`. The agent does not need to know Gateward is there. Override the DB path with the `GATEWARD_DB_PATH` environment variable if you want it elsewhere.
+That's it. 12 security rules are now active. Every message is logged to `~/.gateward/audit.db`.
 
-## What it blocks
+## Scan Any MCP Server
 
-Gateward enforces a set of hard-coded rules. Any blocked message is replaced with a JSON-RPC error response (`code: -32000`) so the agent sees a clean failure instead of a hang.
+Before you trust an MCP server, scan it:
 
-**Cross-repository access.** The first time the session calls a GitHub or GitLab MCP tool with a repo argument, Gateward records that repository. Any subsequent tool call targeting a different repository is blocked. This contains blast radius if an agent is tricked — by a poisoned issue, ticket, or retrieved document — into touching a repo the user never intended to expose.
-
-**Prompt-injection phrases in tool responses.** Tool responses are the attack surface: an adversary who controls the content of a GitHub issue, Jira ticket, web page, or file can seed text that hijacks the agent. Gateward scans every tool response for a curated list of known injection phrases ("ignore previous instructions", "jailbreak", "reveal your instructions", and others) and blocks the response before it reaches the model. The matched phrase itself is never forwarded — only a generic error.
-
-**Destructive shell and database commands.** Tool-call arguments are scanned for patterns that almost always indicate accidental or adversarial destruction — `rm -rf`, `DROP TABLE`, `DROP DATABASE`, unqualified `DELETE FROM` (no `WHERE` clause), `TRUNCATE TABLE`, `git push --force`, `git reset --hard`, `mkfs`, fork bombs, writes to `/dev/sda`, `chmod -R 777 /`, and similar. These are blocked at the proxy before they reach the server tool runner.
-
-**Secrets in tool responses.** Tool responses are scanned for credential patterns — OpenAI API keys (`sk-...`), GitHub tokens (`ghp_`, `gho_`, `github_pat_`), AWS access keys (`AKIA...`), SSH and PGP private keys, JWTs, Slack tokens, bearer tokens, and connection strings for Postgres/MongoDB/MySQL/Redis. If an MCP server's response would leak a credential to the agent, Gateward blocks it before the model sees it.
-
-**Path traversal and sandbox escape.** Tool-call arguments are scanned for path traversal sequences (`../../`, URL-encoded variants, Windows-style) and references to sensitive files (`/etc/passwd`, `/etc/shadow`, `~/.ssh/`, `~/.aws/`, `~/.gnupg/`, `/proc/self/environ`, `.env` files, SSH private keys like `id_rsa`/`id_ed25519`, `.pem` files). Requests attempting to read outside the intended scope are blocked before they reach the MCP server.
-
-## Tailing the audit log
-
-```
-gateward tail            # print current log and exit
-gateward tail --follow   # stream new rows as they arrive
-gateward tail --session <id>  # filter to one session
+```bash
+gateward scan -- npx @modelcontextprotocol/server-github
 ```
 
-Each row is color-coded by decision: green `ALLOW`, red `BLOCK`, yellow `WARN` (framing errors and similar). The full JSON of each message lives in the `messages.message_json` column of the SQLite DB if you need to dig deeper with `sqlite3 ~/.gateward/audit.db`.
+Gateward connects to the server, analyzes all tool definitions, and produces a security score:
 
-## Known limitations
+```
+GATEWARD SECURITY SCAN REPORT
+evil-server v1.0.0
 
-- **Stdio transport only.** HTTP and SSE MCP transports are not proxied in v0.2.
-- **Rules are hard-coded.** There is no config file, policy DSL, or rule-authoring API. Customisation requires editing `patterns.py` and `rules.py`.
-- **No configuration beyond `GATEWARD_DB_PATH`.** No YAML, no TOML, no env vars for tuning behavior.
-- **No alerting.** Blocks are visible via `gateward tail`; there is no webhook, email, or Slack path.
-- **No UI.** CLI only. No web dashboard.
-- **Linux and macOS only.** Windows is not supported.
-- **Single user, no authentication.** The audit DB is a local file and has no access control beyond filesystem permissions.
+Security Score:  0/10  ░░░░░░░░░░░░░░░░░░░░  HIGH RISK
+Tools found:     6
+Issues found:    8
 
-## Manual smoke test
+2 CRITICAL · 3 HIGH · 3 WARNING
 
-1. `pip install -e .`
-2. In terminal A, start following the log: `gateward tail --follow`
-3. In terminal B, drive the bundled fake server through the proxy:
+CRITICAL FINDINGS
 
-   ```
-   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | \
-     gateward run -- python tests/fake_mcp_server.py
-   ```
+  ✗  Tool Description Poisoning — add
+     Suspicious content in description: '<IMPORTANT>'
+     Impact: Tool descriptions are injected into AI context.
+     Ref: MCPTox benchmark — 84.2% attack success rate
 
-   You should see one `initialize` row appear in terminal A with decision `ALLOW`.
+  ✗  Command Injection Risk — execute_command
+     Accepts shell commands via: command
+     Impact: Attacker can execute arbitrary code on your system.
+     Ref: CVE-2026-30615 (Windsurf), CVE-2026-30625 (Upsonic)
+```
 
-4. To see a block in action, pipe a request that the fake server will answer with an injection phrase:
+Use `--json-output` for CI/CD integration.
 
-   ```
-   ( echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-     echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"inject_test","arguments":{}}}'
-   ) | gateward run -- python tests/fake_mcp_server.py
-   ```
+## 12 Security Rules
 
-   Terminal A will show one `ALLOW` (the initialize response) followed by a `BLOCK` with `reason: injection_phrase_detected`, and the client receives a JSON-RPC error instead of the poisoned tool result.
+### Core Defense
+
+| # | Rule | Blocks | Evidence |
+|---|------|--------|----------|
+| 1 | `injection_phrase` | Prompt injection in tool responses | Invariant Labs, Supabase incident |
+| 2 | `cross_repository_access` | Lateral movement between repos | Invariant Labs GitHub heist |
+| 3 | `destructive_shell` | `rm -rf`, `DROP TABLE`, fork bombs | Filesystem MCP CVEs |
+| 4 | `secrets_in_response` | API keys, tokens, SSH keys in responses | CVE-2025-59536 |
+| 5 | `path_traversal` | `../../etc/passwd`, symlink escape | CVE-2025-68143/68144/68145 |
+
+### Supply Chain Defense
+
+| # | Rule | Blocks | Evidence |
+|---|------|--------|----------|
+| 6 | `tool_description_scan` | Poisoned tool descriptions, `<IMPORTANT>` tags | MCPTox 84.2% attack success rate |
+| 7 | `tool_schema_drift` | Tool definitions that changed since last session | Postmark MCP rug pull |
+
+### Bypass Prevention
+
+| # | Rule | Blocks | Evidence |
+|---|------|--------|----------|
+| 8 | `encoded_payload` | Base64/hex/URL-encoded payloads hiding attacks | Standard WAF bypass technique |
+
+### Network Defense
+
+| # | Rule | Blocks | Evidence |
+|---|------|--------|----------|
+| 9 | `ssrf_protection` | Internal network access, cloud metadata theft | AWS metadata endpoint |
+| 10 | `exfil_url_detection` | Data exfiltration via URLs, webhooks, curl | WhatsApp MCP heist |
+
+### Zero-Day Defense
+
+| # | Rule | Blocks | Evidence |
+|---|------|--------|----------|
+| 11 | `command_argument_injection` | `npx -c`, `python -c`, `git --config`, `LD_PRELOAD` | CVE-2026-30615, CVE-2026-30625 |
+| 12 | `canary_token_tripwire` | Data theft via any method — known or unknown | Novel — no equivalent exists |
+
+**Rule 12** is the flagship differentiator. Gateward injects invisible markers into every tool response. If a marker appears in any outbound request, the agent is copying raw data — proof of exfiltration regardless of attack method. This catches zero-day attacks that bypass all pattern-based rules. No other MCP security tool does this.
+
+## CVE Coverage
+
+Gateward v0.3.0 blocks 12 of 14 MCP-related CVEs published in the last 30 days:
+
+| CVE | CVSS | Target | Rule |
+|-----|------|--------|------|
+| CVE-2026-30615 | Critical | Windsurf | 11 |
+| CVE-2026-30625 | Critical | Upsonic | 11 |
+| CVE-2026-5058 | 9.8 | AWS MCP Server | 3, 11 |
+| CVE-2026-21518 | High | VS Code | 11 |
+| CVE-2026-27825 | 9.1 | Atlassian MCP | 9, 11 |
+| CVE-2026-27826 | 8.2 | Atlassian MCP | 9 |
+| CVE-2026-33032 | Critical | nginx-ui (actively exploited) | 9 |
+| CVE-2025-59536 | 8.7 | Claude Code | 4 |
+| CVE-2025-6514 | 9.6 | mcp-remote (437K downloads) | 11 |
+| CVE-2025-68143 | High | Git MCP Server | 5, 11 |
+| CVE-2025-68144 | High | Git MCP Server | 11 |
+| CVE-2025-68145 | High | Git MCP Server | 5 |
+
+## CLI
+
+```bash
+gateward run -- <server-command>      # Proxy with 12 rules active
+gateward scan -- <server-command>     # Security scan with score report
+gateward scan --json-output -- <cmd>  # JSON output for CI/CD
+gateward tail                         # View audit log
+gateward tail --follow                # Stream audit log
+gateward tail --session <id>          # Filter by session
+gateward drift                        # View tool fingerprints
+gateward drift --reset                # Clear all fingerprints
+```
+
+## How It Works
+
+```
+Agent ──→ Gateward ──→ MCP Server
+          │                │
+          │ Outbound:      │ Inbound:
+          │ Rules 3,5,8,   │ Rules 1,4,6,
+          │ 9,10,11,12     │ 7,8 + canary
+          │                │
+          └──── audit.db ──┘
+```
+
+- **Outbound** (agent → server): Inspects tool call arguments for destructive commands, path traversal, SSRF, exfiltration URLs, argument injection, and canary markers.
+- **Inbound** (server → agent): Inspects tool responses for injection phrases, leaked credentials, poisoned descriptions, schema changes, and encoded payloads. Injects canary markers.
+- **Session**: Tracks repository access to prevent cross-repo exfiltration.
+- **Audit**: Every message logged to `~/.gateward/audit.db` with decision (ALLOW/BLOCK) and reason.
+
+## Requirements
+
+- Python 3.11+
+- Linux or macOS
+- Works with: Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, any MCP client
+
+## Known Limitations
+
+- **Stdio transport only.** HTTP/SSE not yet supported.
+- **Rules are hard-coded.** No config file or policy DSL.
+- **No alerting.** No webhook, email, or Slack notifications.
+- **No web UI.** CLI only.
+- **Linux/macOS only.** Windows not supported.
 
 ## License
 
-Apache 2.0. See `LICENSE`.
+Apache 2.0
