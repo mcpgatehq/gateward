@@ -18,15 +18,7 @@ Anthropic has stated these behaviors are "expected" and will not be patched at t
 pip install gateward
 ```
 
-The PyPI package has not yet been published. Until it is, clone this repo and install from source:
-
-```
-git clone https://github.com/mcpgatehq/gateward.git
-cd gateward
-pip install -e .
-```
-
-Python 3.11+ on Linux or macOS. Windows is not supported in v0.1.
+Python 3.11+ on Linux or macOS. Windows is not supported in v0.2.
 
 ## Quick start
 
@@ -86,7 +78,7 @@ Each row is color-coded by decision: green `ALLOW`, red `BLOCK`, yellow `WARN` (
 
 ## Known limitations
 
-- **Stdio transport only.** HTTP and SSE MCP transports are not proxied in v0.1.
+- **Stdio transport only.** HTTP and SSE MCP transports are not proxied in v0.2.
 - **Rules are hard-coded.** There is no config file, policy DSL, or rule-authoring API. Customisation requires editing `patterns.py` and `rules.py`.
 - **No configuration beyond `GATEWARD_DB_PATH`.** No YAML, no TOML, no env vars for tuning behavior.
 - **No alerting.** Blocks are visible via `gateward tail`; there is no webhook, email, or Slack path.
