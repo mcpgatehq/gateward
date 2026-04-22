@@ -10,6 +10,7 @@ from rich.text import Text
 
 from gateward import __version__
 from gateward.proxy import run_proxy
+from gateward.schema_store import SchemaStore
 from gateward.storage import Storage, default_db_path
 
 
@@ -57,6 +58,41 @@ def tail(follow: bool, session_id: str | None) -> None:
         pass
     finally:
         storage.close()
+
+
+@main.command()
+@click.option("--reset", is_flag=True, help="Wipe all stored fingerprints.")
+@click.option(
+    "--reset-server",
+    "reset_server",
+    default=None,
+    help="Wipe stored fingerprints for a specific server command (matches server_command column).",
+)
+def drift(reset: bool, reset_server: str | None) -> None:
+    """Show stored tool fingerprints for schema-drift (rug pull) detection."""
+    console = Console()
+    store = SchemaStore()
+    try:
+        if reset or reset_server:
+            removed = store.reset(reset_server)
+            console.print(f"removed {removed} fingerprint(s).", style="yellow")
+            return
+        rows = store.all_fingerprints()
+        if not rows:
+            console.print("no tool fingerprints recorded yet.", style="dim")
+            return
+        for row in rows:
+            text = Text()
+            text.append(f"{row['server_command']}", style="cyan")
+            text.append(f"  {row['tool_name']}", style="white")
+            text.append(
+                f"  desc={row['description_hash']}  schema={row['schema_hash']}",
+                style="dim",
+            )
+            text.append(f"  first_seen={row['first_seen']}", style="dim")
+            console.print(text)
+    finally:
+        store.close()
 
 
 def _print_row(console: Console, row: dict) -> None:

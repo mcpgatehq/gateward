@@ -17,6 +17,7 @@ from typing import Any
 
 from gateward.framing import FramingError, read_message, write_message
 from gateward.rules import Decision, evaluate
+from gateward.schema_store import SchemaStore
 from gateward.session import Session
 from gateward.storage import Storage
 
@@ -158,6 +159,11 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
 
     server_name = _derive_server_name(server_command)
     session = Session(server_name=server_name, server_command=" ".join(server_command))
+    try:
+        session.schema_store = SchemaStore()
+    except Exception as exc:
+        print(f"gateward: schema store init failed: {exc}", file=sys.stderr)
+        session.schema_store = None
     storage.start_session(session.session_id, server_name, session.server_command)
 
     loop = asyncio.get_running_loop()
@@ -331,4 +337,6 @@ async def run_proxy(server_command: list[str], storage: Storage) -> int:
         pass
 
     storage.end_session(session.session_id)
+    if session.schema_store is not None:
+        session.schema_store.close()
     return exit_code

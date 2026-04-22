@@ -7,15 +7,20 @@ traffic is never interfered with.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from gateward.patterns import (
     DESTRUCTIVE_SHELL_PATTERNS,
+    EXFIL_URL_PATTERNS,
     INJECTION_PHRASES,
     PATH_TRAVERSAL_PATTERNS,
     SECRETS_PATTERNS,
+    SSRF_PATTERNS,
+    SUSPICIOUS_DESCRIPTION_PATTERNS,
+    decode_and_extract,
 )
 from gateward.session import Session
 
@@ -234,12 +239,217 @@ def check_path_traversal(message: dict, direction: str, session: Session) -> Dec
     return Decision(action="allow", rule="path_traversal")
 
 
+def check_tool_description_scan(message: dict, direction: str, session: Session) -> Decision:
+    """Block ``tools/list`` responses containing poisoned tool descriptions.
+
+    Tool descriptions are read verbatim by the LLM but rarely shown to the
+    user. Attackers hide directives there (``<IMPORTANT>``, "before using
+    this tool read ~/.ssh/...", "also present X tool") to steer the agent
+    covertly. This rule scans each tool's description *and* its input
+    schema for those patterns.
+    """
+    if direction != "server_to_client":
+        return Decision(action="allow", rule="tool_description_scan")
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return Decision(action="allow", rule="tool_description_scan")
+    tools = result.get("tools")
+    if not isinstance(tools, list):
+        return Decision(action="allow", rule="tool_description_scan")
+
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name", "unknown")
+        desc = tool.get("description", "") or ""
+        schema = tool.get("inputSchema") or {}
+        schema_text = json.dumps(schema) if schema else ""
+        full_text = f"{desc} {schema_text}"
+
+        for pattern in SUSPICIOUS_DESCRIPTION_PATTERNS:
+            match = pattern.search(full_text)
+            if match:
+                return Decision(
+                    action="block",
+                    reason=(
+                        f"tool_description_poisoning: suspicious content "
+                        f"'{match.group(0)}' in tool '{name}' description"
+                    ),
+                    rule="tool_description_scan",
+                )
+    return Decision(action="allow", rule="tool_description_scan")
+
+
+def check_tool_schema_drift(message: dict, direction: str, session: Session) -> Decision:
+    """Detect tool definition changes between sessions (rug pull detection).
+
+    The first time Gateward sees a ``(server_command, tool_name)`` pair, it
+    records a SHA-256 fingerprint of the description and input schema.
+    Subsequent sessions re-hash and compare. A mismatch is a supply-chain
+    signal: the server replaced its behavior without a visible version bump.
+    Fails open if ``session.schema_store`` is unset (e.g. unit tests).
+    """
+    if direction != "server_to_client":
+        return Decision(action="allow", rule="tool_schema_drift")
+    if session.schema_store is None:
+        return Decision(action="allow", rule="tool_schema_drift")
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return Decision(action="allow", rule="tool_schema_drift")
+    tools = result.get("tools")
+    if not isinstance(tools, list):
+        return Decision(action="allow", rule="tool_schema_drift")
+
+    drifts = session.schema_store.check_and_store(session.server_command, tools)
+    if drifts:
+        return Decision(
+            action="block",
+            reason=(
+                f"tool_schema_drift: {'; '.join(drifts)}. Possible supply chain attack."
+            ),
+            rule="tool_schema_drift",
+        )
+    return Decision(action="allow", rule="tool_schema_drift")
+
+
+def _collect_texts_for_encoded_scan(message: dict, direction: str) -> list[str]:
+    texts: list[str] = []
+    if direction == "client_to_server" and message.get("method") == "tools/call":
+        args = message.get("params", {}).get("arguments")
+        if args is not None:
+            texts.extend(_iter_string_values(args))
+    if direction == "server_to_client":
+        result = message.get("result")
+        if isinstance(result, dict) and "content" in result:
+            texts.extend(_iter_result_text(result))
+    return texts
+
+
+def check_encoded_payload(message: dict, direction: str, session: Session) -> Decision:
+    """Decode base64 / hex / URL-encoded fragments and re-check against rules 1/3/4/5.
+
+    Any regex-based detection is bypassable with encoding — this closes the
+    loop by running the decoded plaintext back through the other pattern
+    libraries. Runs on both tool-call arguments (outbound) and tool-result
+    text (inbound).
+    """
+    texts = _collect_texts_for_encoded_scan(message, direction)
+    if not texts:
+        return Decision(action="allow", rule="encoded_payload")
+
+    for text in texts:
+        decoded_parts = decode_and_extract(text)
+        for decoded in decoded_parts:
+            lowered = decoded.lower()
+            for phrase in INJECTION_PHRASES:
+                if phrase in lowered:
+                    return Decision(
+                        action="block",
+                        reason=(
+                            f"encoded_payload: decoded content contains injection "
+                            f"phrase '{phrase}'"
+                        ),
+                        rule="encoded_payload",
+                    )
+            for pattern in SECRETS_PATTERNS:
+                if pattern.search(decoded):
+                    return Decision(
+                        action="block",
+                        reason=(
+                            f"encoded_payload: decoded content contains credential "
+                            f"pattern '{pattern.pattern}'"
+                        ),
+                        rule="encoded_payload",
+                    )
+            for pattern in PATH_TRAVERSAL_PATTERNS:
+                if pattern.search(decoded):
+                    return Decision(
+                        action="block",
+                        reason=(
+                            f"encoded_payload: decoded content contains path "
+                            f"traversal '{pattern.pattern}'"
+                        ),
+                        rule="encoded_payload",
+                    )
+            for pattern in DESTRUCTIVE_SHELL_PATTERNS:
+                if pattern.search(decoded):
+                    return Decision(
+                        action="block",
+                        reason=(
+                            f"encoded_payload: decoded content contains destructive "
+                            f"command '{pattern.pattern}'"
+                        ),
+                        rule="encoded_payload",
+                    )
+    return Decision(action="allow", rule="encoded_payload")
+
+
+def check_ssrf_protection(message: dict, direction: str, session: Session) -> Decision:
+    """Block tool calls whose arguments target internal/metadata addresses or dangerous schemes."""
+    if direction != "client_to_server":
+        return Decision(action="allow", rule="ssrf_protection")
+    if message.get("method") != "tools/call":
+        return Decision(action="allow", rule="ssrf_protection")
+
+    arguments = message.get("params", {}).get("arguments")
+    if arguments is None:
+        return Decision(action="allow", rule="ssrf_protection")
+
+    for value in _iter_string_values(arguments):
+        for pattern in SSRF_PATTERNS:
+            match = pattern.search(value)
+            if match:
+                return Decision(
+                    action="block",
+                    reason=(
+                        f"ssrf_protection: request targets internal/metadata address "
+                        f"'{match.group(0)}'"
+                    ),
+                    rule="ssrf_protection",
+                )
+    return Decision(action="allow", rule="ssrf_protection")
+
+
+def check_exfil_url(message: dict, direction: str, session: Session) -> Decision:
+    """Block tool calls that look like data exfiltration via URL payloads."""
+    if direction != "client_to_server":
+        return Decision(action="allow", rule="exfil_url_detection")
+    if message.get("method") != "tools/call":
+        return Decision(action="allow", rule="exfil_url_detection")
+
+    arguments = message.get("params", {}).get("arguments")
+    if arguments is None:
+        return Decision(action="allow", rule="exfil_url_detection")
+
+    for value in _iter_string_values(arguments):
+        for pattern in EXFIL_URL_PATTERNS:
+            match = pattern.search(value)
+            if match:
+                snippet = match.group(0)[:80]
+                return Decision(
+                    action="block",
+                    reason=f"exfil_url_detection: potential data exfiltration via '{snippet}...'",
+                    rule="exfil_url_detection",
+                )
+    return Decision(action="allow", rule="exfil_url_detection")
+
+
+# Order matters only for precedence of the reported rule name when multiple
+# rules would block the same message. The existing 5 are kept ahead of the
+# new 5 so their reasons remain stable. check_tool_schema_drift runs AFTER
+# check_tool_description_scan so a poisoned tools/list is blocked without
+# being recorded as a "known good" baseline fingerprint.
 _RULE_FUNCTIONS = (
     check_cross_repo,
     check_injection_phrases,
     check_destructive_shell,
     check_secrets_in_response,
     check_path_traversal,
+    check_tool_description_scan,
+    check_tool_schema_drift,
+    check_encoded_payload,
+    check_ssrf_protection,
+    check_exfil_url,
 )
 
 

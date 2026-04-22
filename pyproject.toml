@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gateward"
-version = "0.2.0"
+version = "0.3.0"
 description = "Security gateway for Model Context Protocol (MCP) traffic. Blocks prompt injection, cross-repo exfiltration, and destructive commands."
 readme = "README.md"
 license = {text = "Apache-2.0"}
